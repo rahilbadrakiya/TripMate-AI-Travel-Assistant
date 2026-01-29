@@ -212,6 +212,12 @@ def plan_trip(req: PlanRequest):
         except:
             skyscanner_link = "https://www.skyscanner.co.in/"
 
+        # Calculate actual number of days for the prompt
+        from datetime import datetime as dt
+        start = dt.strptime(req.start_date, "%Y-%m-%d")
+        end = dt.strptime(req.end_date, "%Y-%m-%d")
+        num_days = (end - start).days + 1  # Include both start and end dates
+
         # Dummy flight object for frontend to render the button
         flight_data = [{
             "airline": "Skyscanner Search",
