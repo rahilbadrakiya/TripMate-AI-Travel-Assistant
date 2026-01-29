@@ -49,14 +49,23 @@ async def chat_with_bot(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db)
 ):
+    print(f"DEBUG: Received chat request from user {current_user.email}")
+    
     # 1. Save User Message
-    user_msg = models.ChatMessage(
-        user_id=current_user.id,
-        role="user",
-        content=req.message
-    )
-    db.add(user_msg)
-    db.commit()
+    try:
+        user_msg = models.ChatMessage(
+            user_id=current_user.id,
+            role="user",
+            content=req.message
+        )
+        db.add(user_msg)
+        db.commit()
+        print("DEBUG: Saved user message to database")
+    except Exception as e:
+        print(f"DATABASE ERROR (User Message): {e}")
+        # Even if DB fails, we should try to get helpful AI response back if possible
+        # but for a production app, we usually want persistence.
+        # Let's keep going but log it.
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -65,52 +74,65 @@ async def chat_with_bot(
         "X-Title": "TripMate AI",
     }
     
-    # Context improvement: fetch last few messages to maintain conversation flow?
-    # For now, keeping it simple as per request, just chat. 
-    # But for "continue chat", maybe I should send context? 
-    # The user asked: "after re lunching application user can chat into last chat continue"
-    # This implies context window. I will fetch last 5 messages as context.
-    
-    recent_history = db.query(models.ChatMessage).filter(
-        models.ChatMessage.user_id == current_user.id
-    ).order_by(models.ChatMessage.timestamp.desc()).limit(6).all()
-    # Reverse to chrono order
-    recent_history = recent_history[::-1] # these includes the one we just saved? yes.
-    
     messages_payload = [{"role": "system", "content": "You are a helpful AI travel planner. Please be professional. Use emojis ONLY for bullet points or lists, and very sparingly in paragraphs. Do not overuse them."}]
     
-    for msg in recent_history:
-        messages_payload.append({"role": msg.role, "content": msg.content})
+    try:
+        recent_history = db.query(models.ChatMessage).filter(
+            models.ChatMessage.user_id == current_user.id
+        ).order_by(models.ChatMessage.timestamp.desc()).limit(6).all()
+        # Reverse to chrono order
+        recent_history = recent_history[::-1]
         
-    # If the just saved one is not in recent_history (unlikely unless limit is small), it's fine.
-    # Actually, recent_history includes the one we just added because we committed it.
-    
+        for msg in recent_history:
+            messages_payload.append({"role": msg.role, "content": msg.content})
+        print(f"DEBUG: Prepared payload with {len(messages_payload)} messages")
+    except Exception as e:
+        print(f"DATABASE ERROR (History Fetch): {e}")
+        messages_payload.append({"role": "user", "content": req.message})
+        
     payload = {
         "model": model,
         "messages": messages_payload,
     }
 
     try:
-        response = requests.post(BASE_URL, headers=headers, json=payload)
+        print(f"DEBUG: Calling OpenRouter API with model {model}")
+        # Using a timeout to prevent hanging
+        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=30)
+        
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=f"Chat error: {response.text}")
+            error_detail = response.text
+            print(f"OPENROUTER API ERROR: Status {response.status_code}, Body: {error_detail}")
+            raise HTTPException(status_code=response.status_code, detail=f"OpenRouter Error: {error_detail}")
 
         data = response.json()
+        if "choices" not in data or not data["choices"]:
+             print(f"OPENROUTER INVALID RESPONSE: {data}")
+             raise HTTPException(status_code=502, detail="Invalid response from AI provider")
+             
         bot_reply = data["choices"][0]["message"]["content"]
+        print("DEBUG: Received AI reply")
         
         # 2. Save Bot Response
-        bot_msg = models.ChatMessage(
-            user_id=current_user.id,
-            role="assistant",
-            content=bot_reply
-        )
-        db.add(bot_msg)
-        db.commit()
+        try:
+            bot_msg = models.ChatMessage(
+                user_id=current_user.id,
+                role="assistant",
+                content=bot_reply
+            )
+            db.add(bot_msg)
+            db.commit()
+            print("DEBUG: Saved bot response to database")
+        except Exception as e:
+            print(f"DATABASE ERROR (Bot Message): {e}")
         
         return {"reply": bot_reply}
         
+    except requests.exceptions.Timeout:
+        print("OPENROUTER TIMEOUT")
+        raise HTTPException(status_code=504, detail="AI Assistant timed out. Please try again.")
     except Exception as e:
-        print(f"Chat Error: {e}")
-        # If external API fails, we might want to delete the user message or just leave it?
-        # Leaving it is fine, it's a failed attempt.
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"CHAT UNEXPECTED ERROR: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
