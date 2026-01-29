@@ -191,33 +191,57 @@ def plan_trip(req: PlanRequest):
         # Fetch image
         image_url = fetch_destination_image(req.destination)
 
-        # Fetch real flights (Parallelizable in production)
-        # Now returns a list of dictionaries (JSON) instead of a string
-        flight_data = fetch_real_flights(req.source, req.destination, req.start_date, req.end_date)
+        # Skyscanner Redirect Link Generation
+        # Try to clean strings for URL (lowercase, hyphens)
+        def clean_for_url(s):
+            return s.lower().replace(" ", "-").replace(",", "")
 
-        # Create a natural-language prompt for the itinerary
-        # Calculate actual number of days
-        from datetime import datetime as dt
-        start = dt.strptime(req.start_date, "%Y-%m-%d")
-        end = dt.strptime(req.end_date, "%Y-%m-%d")
-        num_days = (end - start).days + 1  # Include both start and end dates
+        src_slug = clean_for_url(req.source)
+        dest_slug = clean_for_url(req.destination)
         
+        # Skyscanner format: /transport/flights/{origin}/{destination}/{yymmdd}/{yymmdd}
+        # Dates needed in YYMMDD
+        try:
+            from datetime import datetime as dt
+            s_date = dt.strptime(req.start_date, "%Y-%m-%d").strftime("%y%m%d")
+            e_date = dt.strptime(req.end_date, "%Y-%m-%d").strftime("%y%m%d")
+            
+            # Simple deep link attempt using slugs - Skyscanner is smart enough to handle city names often
+            # or fallback to search.
+            skyscanner_link = f"https://www.skyscanner.co.in/transport/flights/{src_slug}/{dest_slug}/{s_date}/{e_date}"
+        except:
+            skyscanner_link = "https://www.skyscanner.co.in/"
+
+        # Dummy flight object for frontend to render the button
+        flight_data = [{
+            "airline": "Skyscanner Search",
+            "flight_number": "SKY-LINK",
+            "departure_time": "",
+            "arrival_time": "",
+            "duration": "",
+            "price": "Check Prices",
+            "booking_link": skyscanner_link
+        }]
+
         prompt = (
-            f"Create a detailed {num_days}-day trip plan for {req.destination} "
+            f"Create a detailed, deep-dive {num_days}-day trip plan for {req.destination} "
             f"for {req.travelers} traveler(s), from {req.start_date} to {req.end_date}. "
             f"Budget: ₹{req.budget_inr or 'flexible'}. "
             f"Preferences: {', '.join(req.preferences or [])}. "
-            f"\n\nHere are the flight options found:\n{flight_data}\n\n"
+            f"\n\n"
             f"Please structure your response STRICTLY as follows:\n"
-            f"1. **Flights**: Briefly summarize the best flight options from the data provided above.\n"
-            f"2. **Hotels**: Suggest 3 good hotel options with estimated prices.\n"
-            f"3. **Itinerary**: A COMPLETE day-by-day itinerary for ALL {num_days} days. "
-            f"IMPORTANT: You MUST include EVERY day from Day 1 to Day {num_days}. "
-            f"For each day, use format '### Day X - [Date]' (e.g., ### Day 1 - {req.start_date}), "
-            f"then list Morning, Afternoon, and Evening activities with timings and descriptions. "
-            f"Do NOT skip or combine any days. Each day must have its own section.\n"
-            f"4. **Budget Breakdown**: A table summarizing costs (Flights, Hotels, Food, Activities, Total).\n\n"
-            f"Tone: Professional and helpful. Use emojis VERY sparingly (max 1 per section header). Do not clutter text with emojis. Keep it clean and informative."
+            f"1. **Accommodations**: Suggest 3 specific, highly-rated hotels/resorts with estimated prices per night.\n"
+            f"2. **Detailed Itinerary**: A COMPLETE, IMMERSIVE day-by-day itinerary for ALL {num_days} days. "
+            f"For each day, use format '### Day X - [Date]' (e.g., ### Day 1 - {req.start_date}). "
+            f"Provide specific timings (Morning, Afternoon, Evening) with deep explanations of *why* to visit each spot, history, or vibe. "
+            f"Make it feel like a professional travel guide.\n"
+            f"3. **Budget Breakdown**: A table summarizing costs STRICTLY for: Hotels, Food, Activities, and Local Transport. "
+            f"❌ DO NOT INCLUDE FLIGHT COSTS in this table.\n\n"
+            f"**Tone & Formatting**: \n"
+            f"- Use **Header 1 (#)** for main title, **Header 2 (##)** for sections like Itinerary/Budget.\n"
+            f"- Use **Bold** for key places and times.\n"
+            f"- Use emojis ✨🌊🍛 *generously* to make it visually engaging and fun.\n"
+            f"- Use varied font sizes (headers) to organize information clearly."
         )
 
         headers = {
