@@ -1,0 +1,11 @@
+﻿fastapi
+uvicorn
+httpx
+requests
+python-dotenv
+sqlalchemy
+passlib
+
+python-jose[cryptography]
+python-multipart
+fastapi-mail
