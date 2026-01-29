@@ -196,17 +196,26 @@ def plan_trip(req: PlanRequest):
         flight_data = fetch_real_flights(req.source, req.destination, req.start_date, req.end_date)
 
         # Create a natural-language prompt for the itinerary
-        # Create a natural-language prompt for the itinerary
+        # Calculate actual number of days
+        from datetime import datetime as dt
+        start = dt.strptime(req.start_date, "%Y-%m-%d")
+        end = dt.strptime(req.end_date, "%Y-%m-%d")
+        num_days = (end - start).days + 1  # Include both start and end dates
+        
         prompt = (
-            f"Create a detailed {req.travelers}-day trip plan for {req.destination} "
-            f"from {req.start_date} to {req.end_date}. "
+            f"Create a detailed {num_days}-day trip plan for {req.destination} "
+            f"for {req.travelers} traveler(s), from {req.start_date} to {req.end_date}. "
             f"Budget: ₹{req.budget_inr or 'flexible'}. "
             f"Preferences: {', '.join(req.preferences or [])}. "
             f"\n\nHere are the flight options found:\n{flight_data}\n\n"
             f"Please structure your response STRICTLY as follows:\n"
             f"1. **Flights**: Briefly summarize the best flight options from the data provided above.\n"
             f"2. **Hotels**: Suggest 3 good hotel options with estimated prices.\n"
-            f"3. **Itinerary**: A detailed day-wise itinerary (Morning, Afternoon, Evening).\n"
+            f"3. **Itinerary**: A COMPLETE day-by-day itinerary for ALL {num_days} days. "
+            f"IMPORTANT: You MUST include EVERY day from Day 1 to Day {num_days}. "
+            f"For each day, use format '### Day X - [Date]' (e.g., ### Day 1 - {req.start_date}), "
+            f"then list Morning, Afternoon, and Evening activities with timings and descriptions. "
+            f"Do NOT skip or combine any days. Each day must have its own section.\n"
             f"4. **Budget Breakdown**: A table summarizing costs (Flights, Hotels, Food, Activities, Total).\n\n"
             f"Tone: Professional and helpful. Use emojis VERY sparingly (max 1 per section header). Do not clutter text with emojis. Keep it clean and informative."
         )
