@@ -4,8 +4,8 @@ httpx
 requests
 python-dotenv
 sqlalchemy
-passlib
-
+passlib[bcrypt]
 python-jose[cryptography]
 python-multipart
 fastapi-mail
+google-search-results
